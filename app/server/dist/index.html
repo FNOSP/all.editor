@@ -1,0 +1,768 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <!-- <link rel="icon" type="image/svg+xml" href="/vite.svg" /> -->
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>文本编辑器</title>
+  <script type="module" crossorigin src="/cgi/ThirdParty/all.editor/api.cgi?_api=read&path=/var/apps/all.editor/target/server/dist/assets/index-BXQQ80_P.js"></script>
+  <link rel="stylesheet" crossorigin href="/cgi/ThirdParty/all.editor/api.cgi?_api=read&path=/var/apps/all.editor/target/server/dist/assets/index-LYhUP2Ly.css">
+</head>
+
+<body>
+  <script>
+    document.body.setAttribute('theme-mode', window.localStorage.getItem('fnos-theme-mode') || '');
+  </script>
+  <!-- 新布局：上方面包屑导航 + 下方左右分栏 -->
+  <div id="mainLayout" style="display: flex; flex-direction: column; height: 100vh; width: 100vw; position: fixed; top: 0; left: 0; overflow: hidden;">
+    
+    <!-- 最上方面包屑导航 - 占据全宽 -->
+    <div class="w-full bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm flex-shrink-0" style="height: 35px;">
+      <div class="px-6 py-4 h-full flex items-center" style="padding-top: 0px;">
+        <div id="breadcrumb" class="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400 overflow-x-auto">
+        </div>
+      </div>
+    </div>
+
+    <!-- 下方左右分栏区域 -->
+    <div class="flex-1 flex" style="overflow: hidden;">
+      <!-- 左侧文件管理器 - 去掉标题和面包屑 -->
+      <div id="fileManagerSidebar" class="bg-white dark:bg-gray-800 shadow-xl border-r border-gray-200 dark:border-gray-700 flex flex-col" style="width: 256px; min-width: 256px; transition: width 0.3s ease;">
+        <!-- 文件列表显示区域 -->
+        <div class="flex-1 overflow-auto p-4 space-y-2">
+          <div id="fileList"></div>
+        </div>
+      </div>
+      
+      <!-- 右侧文本编辑器 -->
+      <div id="editorContainer" class="flex-1" style="overflow: hidden;">
+        <div id="app" style="height: 100%; width: 100%; overflow: auto;"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+// 文件管理器功能 - 调用Node.js API
+class FileManager {
+  constructor() {
+    this.currentPath = '/';
+    this.fileList = [];
+    this.config = null;
+    // 使用前端访问的协议和端口调用API，适配HTTPS和无端口域名
+    const protocol = window.location.protocol; // http: 或 https:
+    const host = window.location.hostname;     // 域名，不包含端口
+    const port = window.location.port;         // 端口号，HTTPS默认443，HTTP默认80时会返回空字符串
+    
+    // 根据协议和端口确定API端口
+    let apiPort = port;
+    if (!apiPort) {
+      // 无端口号时，使用协议对应的默认端口
+      apiPort = protocol === 'https:' ? '443' : '5666';
+    }
+    
+    // 构建API基础URL，使用与前端相同的协议
+    this.apiBaseUrl = `${protocol}//${host}:${apiPort}/cgi/ThirdParty/all.editor/server/api`;
+    this.init();
+  }
+
+  async init() {
+    this.bindEvents();
+    await this.loadConfig();
+    this.loadInitialPathFromURL();
+    
+    // 监听窗口大小变化，动态调整文件管理器宽度
+    window.addEventListener('resize', () => {
+      this.adjustFileManagerWidth();
+    });
+  }
+
+  // 加载配置文件
+  async loadConfig() {
+    try {
+      const configUrl = '/cgi/ThirdParty/all.editor/api.cgi?_api=read&path=/var/apps/all.editor/target/server/conf.json';
+      const response = await fetch(configUrl);
+      if (response.ok) {
+        this.config = await response.json();
+        console.log('✅ 配置文件加载成功:', this.config);
+      } else {
+        console.warn('⚠️ 配置文件加载失败，使用默认配置');
+        this.config = { FirstPath: ['/vol1/1000'] };
+      }
+    } catch (error) {
+      console.warn('⚠️ 配置文件读取错误，使用默认配置:', error);
+      this.config = { FirstPath: ['/vol1/1000'] };
+    }
+  }
+
+  // 获取默认路径列表
+  getDefaultPaths() {
+    return this.config?.FirstPath || ['/vol1/1000'];
+  }
+
+  // 检查路径是否为默认路径
+  isDefaultPath(path) {
+    const defaultPaths = this.getDefaultPaths();
+    return defaultPaths.includes(path);
+  }
+
+  // 显示欢迎界面
+  showWelcomeScreen() {
+    const editorContainer = document.getElementById('app');
+    editorContainer.innerHTML = `
+      <div style="width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #f8f9fa; color: #333; text-align: center; position: relative; overflow: auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;">
+        
+        <!-- 主要内容 -->
+        <div style="max-width: 500px; padding: 60px 40px;">
+          
+          <!-- Logo 区域 -->
+          <div style="margin-bottom: 20px;">
+            <img src="/cgi/ThirdParty/all.editor/api.cgi?_api=read&path=/var/apps/all.editor/target/server/dist/assets/icon_96.png" alt="Editor Logo" style="width: 96px; height: 96px; object-fit: contain;">
+          </div>
+          
+          <!-- 标题 -->
+          <h1 style="font-size: 2rem; font-weight: 600; margin-bottom: 10px; color: #212529; letter-spacing: 0.05em;">
+            万能编辑器
+          </h1>
+          
+          <!-- 副标题 -->
+          <p style="font-size: 1rem; margin-bottom: 20px; color: #6c757d; line-height: 1.6; font-weight: 400;">
+            高效的文本编辑工具
+          </p>
+          
+          <!-- 提示信息 -->
+          <div style="background: #fff; padding: 32px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 1px solid #e9ecef; margin-bottom: 10px;">
+            <p style="font-size: 0.95rem; margin: 0 0 12px 0; color: #495057; font-weight: 500;">
+              请点击左侧列表中的文件进行编辑
+            </p>
+            <p style="font-size: 0.875rem; margin: 0; color: #6c757d;">
+              支持文本、代码、图片等多种格式
+            </p>
+          </div>
+          
+          <!-- 功能特色 -->
+          <div style="display: flex; justify-content: center; gap: 24px; flex-wrap: wrap;">
+            <div style="background: #fff; padding: 12px 20px; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); border: 1px solid #e9ecef;">
+              <span style="font-size: 0.875rem; color: #495057; font-weight: 500;">自带导航</span>
+            </div>
+            <div style="background: #fff; padding: 12px 20px; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); border: 1px solid #e9ecef;">
+              <span style="font-size: 0.875rem; color: #495057; font-weight: 500;">灵活切换</span>
+            </div>
+            <div style="background: #fff; padding: 12px 20px; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); border: 1px solid #e9ecef;">
+              <span style="font-size: 0.875rem; color: #495057; font-weight: 500;">语法高亮</span>
+            </div>
+          </div>
+          
+        </div>
+      </div>
+    `;
+  }
+
+  // 从URL参数中读取初始路径（仅影响文件列表，不影响右侧编辑器）
+  loadInitialPathFromURL() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const pathParam = urlParams.get('path');
+    
+    if (pathParam) {
+      console.log('🔗 从URL读取路径:', pathParam);
+      
+      // 解码URL
+      const decodedPath = decodeURIComponent(pathParam);
+      console.log('🔗 解码后的路径:', decodedPath);
+      
+      // 判断路径类型
+      if (this.isFilePath(decodedPath)) {
+        // 如果是文件，显示其所在目录
+        const directoryPath = this.getParentDirectory(decodedPath);
+        console.log('🔗 检测到文件，显示上级目录:', directoryPath);
+        
+        // 先检查路径是否有效，避免"这不是个目录"错误
+        if (this.isValidDirectoryPath(directoryPath)) {
+          this.loadFileList(directoryPath);
+        } else {
+          console.log('⚠️ 上级目录无效，显示根目录');
+          this.loadFileList('/');
+        }
+        return;
+      }
+      
+      // 如果路径指向目录，直接显示
+      console.log('🔗 显示指定目录:', decodedPath);
+      this.loadFileList(decodedPath);
+    } else {
+      // 没有path参数，显示默认路径和欢迎界面
+      console.log('🔗 没有URL路径参数，显示默认路径和欢迎界面');
+      this.loadFileList('/');
+      this.showWelcomeScreen();
+    }
+  }
+
+  // 验证目录路径是否有效
+  isValidDirectoryPath(path) {
+    // 基本的路径验证
+    if (!path || path === '/') {
+      return true; // 根目录总是有效的
+    }
+    
+    // 检查是否是配置文件中指定的路径
+    const defaultPaths = this.getDefaultPaths();
+    if (defaultPaths.includes(path)) {
+      return true;
+    }
+    
+    // 移除开头的/
+    const cleanPath = path.startsWith('/') ? path.substring(1) : path;
+    
+    // 检查是否是明确的目录路径格式
+    if (cleanPath.includes('/')) {
+      // 多级路径，需要检查每个部分
+      const pathParts = cleanPath.split('/');
+      return pathParts.length > 0 && pathParts.every(part => part.trim().length > 0);
+    }
+    
+    // 单级路径，检查是否为已知目录
+    const knownDirs = ['vol1', 'vol2'];
+    return knownDirs.includes(cleanPath);
+  }
+
+  // 获取上一级目录路径
+  getParentDirectory(filePath) {
+    // 移除开头的/
+    const cleanPath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
+    
+    // 分割路径
+    const pathParts = cleanPath.split('/');
+    
+    // 移除最后一部分（文件名）
+    pathParts.pop();
+    
+    // 如果还有路径，返回带/的路径；否则返回/
+    return pathParts.length > 0 ? '/' + pathParts.join('/') : '/';
+  }
+
+  // 判断是否为文件路径
+  isFilePath(filePath) {
+    // 移除开头的/
+    const cleanPath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
+    
+    // 分割路径并获取最后一部分
+    const pathParts = cleanPath.split('/');
+    const lastPart = pathParts[pathParts.length - 1];
+    
+    // 检查是否是文件：
+    // 1. 有后缀名的文件
+    // 2. 不包含常见的目录名（但不是文件名）
+    // 3. 明确判断的特定格式
+    if (lastPart.includes('.')) {
+      // 有后缀名，应该是文件
+      return true;
+    }
+    
+    // 对于无后缀名的，需要进一步判断
+    // 但这里我们保守地认为无后缀名可能是文件，避免强制当作目录
+    // 只有明确的目录名才当作目录处理
+    const knownDirs = ['vol1', 'vol2', 'documents', 'downloads', 'music', 'videos'];
+    if (knownDirs.includes(lastPart)) {
+      return false; // 明确是目录名
+    }
+    
+    // 其他情况保守地当作文件处理
+    return true;
+  }
+
+  bindEvents() {
+    // 无需绑定关闭按钮和模态框事件（已改为固定布局）
+  }
+
+  // 清除欢迎界面
+  clearWelcomeScreen() {
+    const editorContainer = document.getElementById('app');
+    if (editorContainer.innerHTML.includes('欢迎使用万能编辑器')) {
+      editorContainer.innerHTML = '';
+    }
+  }
+
+  // 读取目录内容 - 调用Node.js API
+  async loadFileList(path = '/') {
+    try {
+      this.currentPath = path;
+      this.updateBreadcrumb();
+
+      // 默认显示配置文件中指定的路径
+      if (path === '/') {
+        const defaultPaths = this.getDefaultPaths();
+        this.fileList = [];
+        
+        // 并行加载所有默认路径的内容
+        const fetchPromises = defaultPaths.map(async (defaultPath) => {
+          try {
+            const cleanPath = defaultPath.substring(1); // 去掉开头的/
+            const apiUrl = `${this.apiBaseUrl}?_api=list&path=${defaultPath}`;
+            console.log('📡 API地址:', apiUrl);
+
+            const response = await fetch(apiUrl);
+            const data = await response.json();
+
+            if (data.code === 200 || data.success === true) {
+              const files = data.data?.files || data.files || [];
+              // 为每个文件添加原始路径信息
+              return files.map(file => ({
+                ...file,
+                path: defaultPath + '/' + file.name,
+                originalPath: defaultPath,
+                displayPath: defaultPath + '/' + file.name
+              }));
+            } else {
+              const errorMsg = data.msg || data.error || '未知错误';
+              return [{
+                name: `[${defaultPath} - 错误: ${errorMsg}]`,
+                type: 'folder',
+                disabled: true,
+                originalPath: defaultPath,
+                displayPath: defaultPath + '/[error]'
+              }];
+            }
+          } catch (error) {
+            console.error(`💥 加载路径 ${defaultPath} 失败:`, error);
+            return [{
+              name: `[${defaultPath} - 加载失败]`,
+              type: 'folder',
+              disabled: true,
+              originalPath: defaultPath,
+              displayPath: defaultPath + '/[error]'
+            }];
+          }
+        });
+        
+        const results = await Promise.all(fetchPromises);
+        this.fileList = results.flat();
+        
+        console.log('📁 加载根目录 (默认路径):', this.fileList);
+        this.renderFileList();
+        return;
+      }
+
+      // 解析路径
+      const cleanPath = path.substring(1); // 去掉开头的/
+      
+      console.log('🔍 调用API读取目录:', cleanPath);
+      
+      // 调用Node.js API
+      const apiUrl = `${this.apiBaseUrl}?_api=list&path=/${cleanPath}`;
+      console.log('📡 API地址:', apiUrl);
+      
+      const response = await fetch(apiUrl);
+      const data = await response.json();
+      
+      // 兼容两种响应格式：{code:200,msg:...,data:{files:[...]}} 或 {success:true,files:[...]}
+      if (data.code === 200 || data.success === true) {
+        console.log('✅ API响应成功:', data);
+        // 优先使用新的data.files格式，回退到旧的files格式
+        this.fileList = data.data?.files || data.files || [];
+      } else {
+        // 提取错误信息，兼容两种格式
+        const errorMsg = data.msg || data.error || '未知错误';
+        console.error('❌ API返回错误:', errorMsg);
+        this.fileList = [{
+          name: `[错误: ${errorMsg}]`,
+          type: 'folder',
+          disabled: true
+        }];
+      }
+      
+      // 按文件夹在前，文件在后排序
+      this.fileList.sort((a, b) => {
+        if (a.type === 'folder' && b.type !== 'folder') return -1;
+        if (a.type !== 'folder' && b.type === 'folder') return 1;
+        return a.name.localeCompare(b.name);
+      });
+      
+      console.log('✅ 处理完成:', this.fileList);
+      this.renderFileList();
+
+      // 延迟调整宽度，确保DOM完全渲染
+      setTimeout(() => {
+        this.adjustFileManagerWidth();
+      }, 100);
+
+    } catch (error) {
+      console.error('💥 加载文件列表失败:', error);
+      // 错误时显示配置中的默认路径
+      const defaultPaths = this.getDefaultPaths();
+      this.fileList = defaultPaths.map(defaultPath => ({
+        name: `[${defaultPath} - 加载失败]`,
+        type: 'folder',
+        disabled: true
+      }));
+      this.renderFileList();
+
+      // 延迟调整宽度
+      setTimeout(() => {
+        this.adjustFileManagerWidth();
+      }, 100);
+    }
+  }
+
+updateBreadcrumb() {
+  const breadcrumb = document.getElementById('breadcrumb');
+  breadcrumb.innerHTML = '';
+  
+  // 设置面包屑容器为相对定位和弹性布局
+  breadcrumb.style.position = 'relative';
+  breadcrumb.style.display = 'flex';
+  breadcrumb.style.alignItems = 'center';
+  breadcrumb.style.flexWrap = 'wrap';
+  breadcrumb.style.gap = '4px';
+  breadcrumb.style.zIndex = '10';
+  breadcrumb.style.minHeight = '32px'; // 确保有足够高度
+  breadcrumb.style.width = '90%'
+
+  // 创建面包屑内容容器
+  const breadcrumbContent = document.createElement('div');
+  breadcrumbContent.style.display = 'flex';
+  breadcrumbContent.style.alignItems = 'center';
+  breadcrumbContent.style.flexWrap = 'wrap';
+  breadcrumbContent.style.gap = '4px';
+  breadcrumbContent.style.zIndex = '11'; // 高于输入框
+  breadcrumbContent.style.position = 'relative';
+
+  // "我的文件"按钮
+  const rootSpan = document.createElement('span');
+  rootSpan.className = 'cursor-pointer hover:text-blue-600 font-medium mr-2';
+  rootSpan.textContent = '我的文件';
+  rootSpan.onclick = () => this.goToRoot();
+  breadcrumbContent.appendChild(rootSpan);
+
+  // 显示路径层级面包屑
+  if (this.currentPath !== '/') {
+    const pathParts = this.currentPath.split('/').filter(part => part);
+
+    pathParts.forEach((part, index) => {
+      // 分隔符
+      const separator = document.createElement('span');
+      separator.className = 'text-xs text-gray-400 mx-1';
+      separator.textContent = '/';
+      breadcrumbContent.appendChild(separator);
+
+      // 目录链接
+      const dirSpan = document.createElement('span');
+      dirSpan.className = 'cursor-pointer hover:text-blue-600';
+      dirSpan.textContent = part;
+      // 计算到当前部分的路径
+      const breadcrumbPath = '/' + pathParts.slice(0, index + 1).join('/');
+      dirSpan.onclick = (e) => {
+        e.stopPropagation();
+        console.log('点击面包屑导航:', breadcrumbPath);
+        this.navigate(breadcrumbPath);
+      };
+      breadcrumbContent.appendChild(dirSpan);
+    });
+  }
+
+  // 可编辑的路径输入框
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.id = 'breadcrumbInput';
+  input.value = this.currentPath === '/' ? '/' : this.currentPath;
+  input.className = 'flex-1 max-w-sm px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:border-blue-500 bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white';
+  input.placeholder = '点击此处编辑路径';
+  
+  // 输入框样式 - 绝对定位在底层
+  input.style.position = 'absolute';
+  input.style.left = '0';
+  input.style.top = '0';
+  input.style.width = '100%';
+  input.style.zIndex = '1'; // 低于面包屑内容
+  input.style.opacity = '0'; // 默认隐藏
+  
+  // 事件监听
+  input.addEventListener('focus', (e) => {
+    e.stopPropagation();
+    this.enterEditMode(input, breadcrumbContent);
+  });
+
+  input.addEventListener('blur', () => {
+    setTimeout(() => {
+      if (!input.classList.contains('editing')) {
+        this.exitEditMode(input, breadcrumbContent);
+      }
+    }, 100);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      this.navigateToPath(input.value);
+      this.exitEditMode(input, breadcrumbContent);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      this.exitEditMode(input, breadcrumbContent);
+    }
+  });
+
+  // 添加到面包屑容器
+  breadcrumb.appendChild(input);
+  breadcrumb.appendChild(breadcrumbContent);
+}
+
+// 进入编辑模式
+enterEditMode(input, breadcrumbContent) {
+  input.classList.add('editing');
+
+  // 只隐藏路径面包屑部分，保留"我的文件"按钮
+  const pathElements = breadcrumbContent.querySelectorAll('span:not(.font-medium)');
+  pathElements.forEach(el => {
+    el.style.opacity = '0'; // 隐藏路径分隔符和目录链接
+  });
+
+  input.style.opacity = '1'; // 显示输入框
+
+  // 计算"我的文件"按钮的宽度，让输入框显示在其右边
+  const rootSpan = breadcrumbContent.querySelector('span.font-medium');
+  if (rootSpan) {
+    const rootSpanWidth = rootSpan.offsetWidth + 16; // 加上一些间距
+    input.style.left = `${rootSpanWidth}px`;
+    input.style.width = `calc(100% - ${rootSpanWidth}px)`;
+  } else {
+    input.style.left = '0';
+    input.style.width = '100%';
+  }
+
+  input.focus();
+  input.select();
+}
+
+// 退出编辑模式
+exitEditMode(input, breadcrumbContent) {
+  input.classList.remove('editing');
+  breadcrumbContent.style.opacity = '1'; // 显示面包屑内容
+  input.style.opacity = '0'; // 隐藏输入框
+  input.blur();
+}
+
+// 导航到指定路径
+navigateToPath(path) {
+  // 清理路径
+  let cleanPath = path.trim();
+  if (!cleanPath) {
+    console.warn('⚠️ 路径为空');
+    return;
+  }
+    
+    // 确保路径以/开头
+    if (!cleanPath.startsWith('/')) {
+      cleanPath = '/' + cleanPath;
+    }
+    
+    // 验证路径
+    if (!this.isValidDirectoryPath(cleanPath) && cleanPath !== '/') {
+      alert(`路径无效: ${cleanPath}`);
+      return;
+    }
+    
+    console.log('🔗 导航到路径:', cleanPath);
+    this.navigate(cleanPath);
+  }
+
+  renderFileList() {
+    const fileListEl = document.getElementById('fileList');
+    fileListEl.innerHTML = '';
+
+    this.fileList.forEach(file => {
+      const div = document.createElement('div');
+      const isDisabled = file.disabled;
+      div.className = `flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
+        isDisabled
+          ? 'opacity-50 cursor-not-allowed'
+          : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+      }`;
+
+      const icon = file.type === 'folder' ? '📁' : '📄';
+      
+      div.innerHTML = `
+        <span class="text-lg flex-shrink-0">${icon}</span>
+        <div class="flex-1 min-w-0">
+          <div class="font-medium break-all">${file.name}</div>
+        </div>
+      `;
+
+      if (!isDisabled) {
+        div.onclick = () => {
+          if (file.type === 'folder') {
+            // 使用文件的显示路径进行导航
+            this.navigate(file.displayPath || file.path);
+          } else {
+            this.openFile(file);
+          }
+        };
+      }
+
+      fileListEl.appendChild(div);
+    });
+
+    // 动态调整文件管理器宽度
+    this.adjustFileManagerWidth();
+  }
+
+  // 动态调整文件管理器宽度
+  adjustFileManagerWidth() {
+    const fileManagerSidebar = document.getElementById('fileManagerSidebar');
+    const fileListEl = document.getElementById('fileList');
+    
+    // 计算最长的文件名所需的宽度
+    let maxWidth = 256; // 默认最小宽度
+    
+    const fileItems = fileListEl.querySelectorAll('div > div > div');
+    fileItems.forEach(item => {
+      if (item.classList.contains('font-medium')) {
+        const tempSpan = document.createElement('span');
+        tempSpan.style.position = 'absolute';
+        tempSpan.style.visibility = 'hidden';
+        tempSpan.style.whiteSpace = 'nowrap';
+        tempSpan.style.fontSize = window.getComputedStyle(item).fontSize;
+        tempSpan.style.fontWeight = window.getComputedStyle(item).fontWeight;
+        tempSpan.textContent = item.textContent;
+        document.body.appendChild(tempSpan);
+        
+        const textWidth = tempSpan.offsetWidth;
+        document.body.removeChild(tempSpan);
+        
+        // 计算总宽度：图标 + 文件名 + 间距 + 内边距
+        const iconWidth = 24; // 图标宽度
+        const padding = 48; // 左右内边距
+        const spacing = 12; // 元素间距
+        const totalWidth = textWidth + iconWidth + padding + spacing;
+        
+        maxWidth = Math.max(maxWidth, totalWidth);
+      }
+    });
+
+    // 限制最大宽度为页面宽度的50%
+    const maxAllowedWidth = window.innerWidth * 0.5;
+    const finalWidth = Math.min(maxWidth, maxAllowedWidth);
+    
+    // 设置文件管理器宽度
+    fileManagerSidebar.style.width = `${finalWidth}px`;
+    fileManagerSidebar.style.minWidth = `${finalWidth}px`;
+  }
+
+  // 格式化文件大小
+  formatFileSize(bytes) {
+    if (!bytes) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = bytes;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex++;
+    }
+    return `${size.toFixed(1)} ${units[unitIndex]}`;
+  }
+
+  navigate(path) {
+    this.loadFileList(path);
+    // 如果不是根目录，清除欢迎界面
+    if (path !== '/') {
+      this.clearWelcomeScreen();
+    }
+  }
+
+  goToRoot() {
+    this.loadFileList('/');
+    this.showWelcomeScreen(); // 确保显示欢迎界面
+    this.updateBreadcrumb(); // 重新更新面包屑导航
+  }
+
+  // 判断是否为图片文件
+  isImageFile(fileName) {
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.ico'];
+    const lowerFileName = fileName.toLowerCase();
+    return imageExtensions.some(ext => lowerFileName.endsWith(ext));
+  }
+
+  // 点击文件时处理
+  async openFile(file) {
+    try {
+      // 使用文件的原始路径（如果存在），否则使用当前路径
+      const filePath = file.originalPath || file.path || this.currentPath + '/' + file.name;
+      console.log('📄 点击文件:', filePath);
+      
+      // 清除欢迎界面
+      this.clearWelcomeScreen();
+      
+      // 检查是否为图片文件
+      if (this.isImageFile(file.name)) {
+        this.displayImage({...file, path: filePath});
+      } else {
+        // 跳转到文本编辑器URL
+        this.redirectToTextEditor(filePath);
+      }
+      
+    } catch (error) {
+      console.error('💥 打开文件失败:', error);
+    }
+  }
+
+  // 显示图片
+  displayImage(file) {
+    const editorContainer = document.getElementById('app');
+    
+    // 移除开头的斜杠，构建API路径
+    const cleanPath = file.path.startsWith('/') ? file.path.substring(1) : file.path;
+    
+    // 使用文件管理器的图片API
+    const imageUrl = `${this.apiBaseUrl}?_api=image&path=/${cleanPath}`;
+    
+    console.log('🖼️ 显示图片:', imageUrl);
+    console.log('📄 文件信息:', file);
+    
+    // 创建图片显示HTML - 占据全部空间
+    editorContainer.innerHTML = `
+      <div style="width: 100%; height: 100%; display: flex; flex-direction: column; background-color: #f5f5f5; overflow: auto; position: relative;">
+        
+        <!-- 图片显示区域 - 占据全部空间 -->
+        <div style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px;">
+          <img src="${imageUrl}" alt="${file.name}"
+               style="max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; box-shadow: 0 2px 12px rgba(0,0,0,0.1);"
+               onerror="this.style.display='none'; this.parentElement.innerHTML='<p style=\\'color: red; font-size: 16px; text-align: center;\\'>图片加载失败<br/>URL: ${imageUrl}</p>'">
+        </div>
+      </div>
+    `;
+  }
+
+  // 跳转到文本编辑器
+  redirectToTextEditor(filePath) {
+    // 获取当前地址信息
+    const protocol = window.location.protocol; // http: 或 https:
+    const hostname = window.location.hostname;
+    const port = window.location.port;
+      // 构建基础URL
+    let baseUrl;
+    if (port) {
+      baseUrl = `${protocol}//${hostname}:${port}`;
+    } else {
+      baseUrl = `${protocol}//${hostname}`;
+    }
+          
+          
+    // 构建目标URL
+    const targetUrl = `${baseUrl}/cgi/ThirdParty/all.editor/index.cgi?path=${encodeURIComponent(filePath)}`;
+    
+    console.log('🔗 跳转到文本编辑器:', targetUrl);
+    
+    // 实际跳转
+    window.location.href = targetUrl;
+  }
+}
+
+// 初始化文件管理器
+const fileManager = new FileManager();
+
+// 添加全局方法以便面包屑导航使用
+window.fileManager = fileManager;
+
+  </script>
+</body>
+
+</html>
