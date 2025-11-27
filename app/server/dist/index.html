@@ -81,7 +81,7 @@ class FileManager {
   // 加载配置文件
   async loadConfig() {
     try {
-      const configUrl = '/cgi/ThirdParty/all.editor/api.cgi?_api=read&path=/var/apps/all.editor/target/server/conf.json';
+      const configUrl = '/cgi/ThirdParty/all.editor/api.cgi?_api=read&path=/var/apps/all.editor/target/server/config.json';
       const response = await fetch(configUrl);
       if (response.ok) {
         this.config = await response.json();
