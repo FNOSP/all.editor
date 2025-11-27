@@ -1,5 +1,5 @@
 appname=all.editor
-version=1.0.2
+version=1.0.3
 desc=`<div>支持预览编辑多种格式文件，配有内置文件管理器、地址栏和面包屑导航，切换编辑文件更直观便捷。</div>
 <div>text、strm、txt、js、ts、html、htm、css、scss、less、json、md、py、java、c、cpp、cc、cxx、go、rs、php、rb、sh、sql、xml、yaml、yml、vue 后缀文件直接双击文件或右键选择万能编辑器打开。</div><div>非上述后缀文件，打开桌面图标，在右侧文件管理器，选中对应文件打开。</div>`
 arch=x86_64
