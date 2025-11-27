@@ -1,0 +1,28 @@
+{
+  "name": "text-editor2-backend",
+  "version": "1.0.0",
+  "description": "后端API服务 - 提供文件读取功能",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "build": "pkg -t node16-linux-x64 ./cgi.js --output ./dist/api"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "path": "^0.12.7",
+    "fs": "^0.0.1-security"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1",
+    "pkg": "^5.8.1"
+  },
+  "keywords": [
+    "file-manager",
+    "text-editor",
+    "api"
+  ],
+  "author": "飞牛开发",
+  "license": "MIT"
+}
